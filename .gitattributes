@@ -1,0 +1,6 @@
+data/raw/listingsAndReviews.json filter=lfs diff=lfs merge=lfs -text
+data/raw/instagram_usage_lifestyle.csv filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.csv filter=lfs diff=lfs merge=lfs -text
+*.json filter=lfs diff=lfs merge=lfs -text
