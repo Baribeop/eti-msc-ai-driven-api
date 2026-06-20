@@ -963,7 +963,7 @@ app = FastAPI(
     Supports: PostgreSQL, MongoDB, Redis, InfluxDB, Neo4j
 
     ### Base URL
-    `https://your-service.onrender.com`
+    `https://eti-msc-ai-driven-api.onrender.com/docs`
 
     ### Authentication
     `POST /predict`, `POST /model/switch`, `POST /retrain` require `x_api_key` header.
@@ -1008,7 +1008,7 @@ class QueryRequest(BaseModel):
 
 @app.get("/", tags=["System"], include_in_schema=False)
 def home():
-    return RedirectResponse(url="/docs")
+    return RedirectResponse(url="https://eti-msc-ai-driven-api.onrender.com/docs")
 
 @app.get("/health", tags=["System"])
 def health():
@@ -1025,7 +1025,7 @@ def health():
 @app.get("/configuration", tags=["System"])
 def configuration():
     return {
-        "version": "2.0",
+        "version": "1.0",
         "supported_databases": ["PostgreSQL", "MongoDB", "Redis", "InfluxDB", "Neo4j"],
         "authentication": "x-api-key header required for protected endpoints"
     }
