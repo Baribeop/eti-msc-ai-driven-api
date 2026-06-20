@@ -967,7 +967,7 @@ app = FastAPI(
 
     ### Authentication
     `POST /predict`, `POST /model/switch`, `POST /retrain` require `x_api_key` header.
-    Set `API_KEY` in Render Environment Variables, then use it in Swagger "Authorize".
+   
 
     ### Quick Start
     1. `POST /analyze` Extract features from payload
