@@ -7,7 +7,7 @@ def cache_score(keys):
 
     for key in keys:
 
-        if key in CACHE_KEYS:
+        if any(word in key for word in CACHE_KEYS):
             score += 2
 
     return min(score, 10)

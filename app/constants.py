@@ -3,29 +3,54 @@ TRANSACTIONAL_KEYS = {
     "payment",
     "amount",
     "invoice",
-    "account"
+    "account",
+    "order",
+    "customer",
+    "seller",
+    "product",
+    "purchase",
+    "checkout",
+    "payment"
 }
 
 CACHE_KEYS = {
     "session",
     "cache",
     "token",
-    "expires"
+    "expires",
+    "expiry",
+    "ttl",
+    "temporary",
+    "login"
 }
 
 TIME_SERIES_KEYS = {
     "timestamp",
+    "time",
+    "date",
     "temperature",
     "humidity",
-    "cpu_usage",
+    "sensor",
+    "reading",
+    "metric",
+    "metrics",
     "telemetry",
-    "metrics"
+    "pressure",
+    "voltage",
+    "current",
+    "rpm"
 }
 
 RELATIONSHIP_KEYS = {
+    "friend",
     "friends",
-    "followers",
+    "relationship",
+    "connection",
     "connections",
+    "edge",
     "edges",
-    "relationships"
+    "node",
+    "nodes",
+    "follower",
+    "followers"
 }

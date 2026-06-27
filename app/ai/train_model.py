@@ -245,9 +245,137 @@
 
 
 
+# import joblib
+# import pandas as pd
+# import numpy as np
+# from pathlib import Path
+# from sklearn.model_selection import train_test_split
+# from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+# from sklearn.tree import DecisionTreeClassifier
+# from sklearn.preprocessing import LabelEncoder
+# import xgboost as xgb
+# import lightgbm as lgb
+# import logging
+# from typing import Dict
+
+# logger = logging.getLogger(__name__)
+
+# class MultiModelTrainer:
+#     def __init__(self):
+#         self.data_dir = Path("data")
+#         self.model_dir = Path("app/ai/models")
+#         self.model_dir.mkdir(parents=True, exist_ok=True)
+#         self.feature_names = [
+#             'scs', 'max_depth', 'transactional_score', 'cache_score',
+#             'relationship_score', 'time_series_score', 'schema_flexibility',
+#             'is_bulk', 'has_identifier', 'num_keys', 'has_nested'
+#         ]
+
+#     def load_data(self):
+#         """Load latest training data"""
+#         csv_files = list(self.data_dir.glob("*.csv")) + list(Path("app/ai").glob("real_training_data_*.csv"))
+#         if not csv_files:
+#             raise FileNotFoundError("No training data found. Run data collector first.")
+        
+#         latest = max(csv_files, key=lambda x: x.stat().st_mtime)
+#         logger.info(f"Loading training data: {latest.name}")
+#         df = pd.read_csv(latest)
+#         return df
+
+#     def prepare_data(self, df: pd.DataFrame):
+#         """Ensure all 11 features are present"""
+#         # Fill missing structural features with sensible defaults
+#         for col in ['is_bulk', 'has_identifier', 'has_nested']:
+#             if col not in df.columns:
+#                 df[col] = 0
+#             else:
+#                 df[col] = df[col].astype(int)
+        
+#         if 'num_keys' not in df.columns:
+#             df['num_keys'] = 0
+
+#         # Keep only required features + target
+#         X = df[self.feature_names]
+#         y = df['target']
+        
+#         # Encode labels
+#         le = LabelEncoder()
+#         y_encoded = le.fit_transform(y)
+        
+#         # Save label encoder
+#         joblib.dump(le, self.model_dir / "label_encoder.pkl")
+#         logger.info(f"Classes: {le.classes_}")
+        
+#         return X, y_encoded, le
+
+#     def train_all_models(self):
+#         df = self.load_data()
+#         X, y, le = self.prepare_data(df)
+        
+#         X_train, X_test, y_train, y_test = train_test_split(
+#             X, y, test_size=0.2, random_state=42, stratify=y
+#         )
+        
+#         models = {}
+#         metrics = {}
+
+#         # Decision Tree
+#         dt = DecisionTreeClassifier(random_state=42)
+#         dt.fit(X_train, y_train)
+#         models["decision_tree"] = dt
+#         metrics["decision_tree"] = dt.score(X_test, y_test)
+
+#         # Random Forest (main model)
+#         rf = RandomForestClassifier(n_estimators=200, random_state=42)
+#         rf.fit(X_train, y_train)
+#         models["random_forest"] = rf
+#         metrics["random_forest"] = rf.score(X_test, y_test)
+
+#         # Gradient Boosting
+#         gb = GradientBoostingClassifier(random_state=42)
+#         gb.fit(X_train, y_train)
+#         models["gradient_boosting"] = gb
+#         metrics["gradient_boosting"] = gb.score(X_test, y_test)
+
+#         # XGBoost
+#         xgb_model = xgb.XGBClassifier(random_state=42, eval_metric='mlogloss')
+#         xgb_model.fit(X_train, y_train)
+#         models["xgboost"] = xgb_model
+#         metrics["xgboost"] = xgb_model.score(X_test, y_test)
+
+#         # LightGBM
+#         lgb_model = lgb.LGBMClassifier(random_state=42, verbose=-1)
+#         lgb_model.fit(X_train, y_train)
+#         models["lightgbm"] = lgb_model
+#         metrics["lightgbm"] = lgb_model.score(X_test, y_test)
+
+#         # Save all models
+#         for name, model in models.items():
+#             joblib.dump(model, self.model_dir / f"{name}.pkl")
+#             logger.info(f"✅ Saved {name} model")
+
+#         logger.info("Training completed with metrics:")
+#         for model_name, score in metrics.items():
+#             logger.info(f"  {model_name}: {score:.4f}")
+
+#         return metrics
+
+# if __name__ == "__main__":
+#     trainer = MultiModelTrainer()
+#     trainer.train_all_models()
+
+
+
+
+
+
+
+
 import joblib
 import pandas as pd
 import numpy as np
+import json
+from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -257,9 +385,10 @@ import xgboost as xgb
 import lightgbm as lgb
 import logging
 from typing import Dict
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
+ 
 class MultiModelTrainer:
     def __init__(self):
         self.data_dir = Path("data")
@@ -270,96 +399,130 @@ class MultiModelTrainer:
             'relationship_score', 'time_series_score', 'schema_flexibility',
             'is_bulk', 'has_identifier', 'num_keys', 'has_nested'
         ]
-
+ 
     def load_data(self):
-        """Load latest training data"""
+        """Load latest training data.
+ 
+        NOTE: self.data_dir is Path("data") - this also globs any stray
+        CSV sitting directly in data/ (not data/raw/). If you ever place
+        an unrelated CSV there with a newer modification time than your
+        real_training_data_*.csv, it could be picked up instead. Run
+        `ls data/*.csv` to confirm nothing unexpected is there if results
+        ever look off.
+        """
         csv_files = list(self.data_dir.glob("*.csv")) + list(Path("app/ai").glob("real_training_data_*.csv"))
         if not csv_files:
             raise FileNotFoundError("No training data found. Run data collector first.")
-        
+ 
         latest = max(csv_files, key=lambda x: x.stat().st_mtime)
         logger.info(f"Loading training data: {latest.name}")
+        print(f"Loading training data: {latest.name}")
         df = pd.read_csv(latest)
+        print(f"Loaded {len(df)} rows, {df['target'].nunique()} classes")
+        print(df['target'].value_counts().to_string())
         return df
-
+ 
     def prepare_data(self, df: pd.DataFrame):
         """Ensure all 11 features are present"""
-        # Fill missing structural features with sensible defaults
         for col in ['is_bulk', 'has_identifier', 'has_nested']:
             if col not in df.columns:
                 df[col] = 0
             else:
                 df[col] = df[col].astype(int)
-        
+ 
         if 'num_keys' not in df.columns:
             df['num_keys'] = 0
-
-        # Keep only required features + target
+ 
         X = df[self.feature_names]
         y = df['target']
-        
-        # Encode labels
+ 
         le = LabelEncoder()
         y_encoded = le.fit_transform(y)
-        
-        # Save label encoder
+ 
         joblib.dump(le, self.model_dir / "label_encoder.pkl")
         logger.info(f"Classes: {le.classes_}")
-        
+        print(f"Classes (label-encoded order): {list(le.classes_)}")
+ 
         return X, y_encoded, le
-
+ 
     def train_all_models(self):
         df = self.load_data()
         X, y, le = self.prepare_data(df)
-        
+ 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
         )
-        
+        print(f"\nTrain samples: {len(X_train)} | Test samples: {len(X_test)}\n")
+ 
         models = {}
         metrics = {}
-
+ 
         # Decision Tree
         dt = DecisionTreeClassifier(random_state=42)
         dt.fit(X_train, y_train)
         models["decision_tree"] = dt
         metrics["decision_tree"] = dt.score(X_test, y_test)
-
+        print(f"decision_tree: {metrics['decision_tree']:.4f}")
+ 
         # Random Forest (main model)
         rf = RandomForestClassifier(n_estimators=200, random_state=42)
         rf.fit(X_train, y_train)
         models["random_forest"] = rf
         metrics["random_forest"] = rf.score(X_test, y_test)
-
+        print(f"random_forest: {metrics['random_forest']:.4f}")
+ 
         # Gradient Boosting
         gb = GradientBoostingClassifier(random_state=42)
         gb.fit(X_train, y_train)
         models["gradient_boosting"] = gb
         metrics["gradient_boosting"] = gb.score(X_test, y_test)
-
+        print(f"gradient_boosting: {metrics['gradient_boosting']:.4f}")
+ 
         # XGBoost
         xgb_model = xgb.XGBClassifier(random_state=42, eval_metric='mlogloss')
         xgb_model.fit(X_train, y_train)
         models["xgboost"] = xgb_model
         metrics["xgboost"] = xgb_model.score(X_test, y_test)
-
+        print(f"xgboost: {metrics['xgboost']:.4f}")
+ 
         # LightGBM
         lgb_model = lgb.LGBMClassifier(random_state=42, verbose=-1)
         lgb_model.fit(X_train, y_train)
         models["lightgbm"] = lgb_model
         metrics["lightgbm"] = lgb_model.score(X_test, y_test)
-
+        print(f"lightgbm: {metrics['lightgbm']:.4f}")
+ 
         # Save all models
         for name, model in models.items():
             joblib.dump(model, self.model_dir / f"{name}.pkl")
-            logger.info(f"✅ Saved {name} model")
-
+            logger.info(f"Saved {name} model")
+ 
+        # Save metrics + metadata to a persistent file (brought back from
+        # the earlier draft version, since it's useful for documentation/
+        # audit purposes and costs nothing)
+        metrics_with_meta = {
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat(),
+            "test_size": 0.2,
+            "n_train_samples": len(X_train),
+            "n_test_samples": len(X_test),
+            "classes": list(le.classes_),
+        }
+        joblib.dump(metrics_with_meta, self.model_dir / "metrics.pkl")
+        print(f"\nSaved metrics -> {self.model_dir / 'metrics.pkl'}")
+ 
+        print("\n=== FINAL METRICS ===")
+        for name, score in metrics.items():
+            print(f"{name}: {score:.4f}")
+ 
         logger.info("Training completed with metrics:")
         for model_name, score in metrics.items():
             logger.info(f"  {model_name}: {score:.4f}")
-
+ 
         return metrics
-
+ 
+ 
 if __name__ == "__main__":
     trainer = MultiModelTrainer()
     trainer.train_all_models()
+ 

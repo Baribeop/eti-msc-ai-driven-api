@@ -9,5 +9,6 @@ def transactional_score(keys):
 
         if any(word in key for word in TRANSACTIONAL_KEYS):
             score += 2
+        
 
     return min(score, 10)

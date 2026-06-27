@@ -226,7 +226,27 @@ def analyze_payload(data: Any) -> Dict:
     # === Ensure all 4 structural features are always present (critical fix) ===
     structural = {
         "is_bulk": isinstance(data, list) or (isinstance(data, dict) and len(data) > 8),
-        "has_identifier": isinstance(data, dict) and ("id" in data or "_id" in data or "uuid" in data),
+        
+        # "has_identifier": isinstance(data, dict) and ("id" in data or "_id" in data or "uuid" in data),
+
+        # "has_identifier": (
+        #     isinstance(data, dict)
+        #     and any(
+        #         "id" in k.lower()
+        #         or "uuid" in k.lower()
+        #         for k in data.keys()
+        #     )
+        # ),
+
+
+        "has_identifier": (
+            isinstance(data, dict)
+            and any(
+                "id" in str(k).lower()
+                or "uuid" in str(k).lower()
+                for k in data.keys()
+            )
+        ),
         "num_keys": len(set(keys)),
         "has_nested": any(isinstance(v, (dict, list)) for v in (data.values() if isinstance(data, dict) else []))
     }

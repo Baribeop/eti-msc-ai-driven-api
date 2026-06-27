@@ -7,7 +7,7 @@ def time_series_score(keys):
 
     for key in keys:
 
-        if key in TIME_SERIES_KEYS:
+        if any(word in key for word in TIME_SERIES_KEYS):
             score += 2
 
     return min(score, 10)
