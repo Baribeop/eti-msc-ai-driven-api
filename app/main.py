@@ -1008,7 +1008,8 @@ class QueryRequest(BaseModel):
 
 @app.get("/", tags=["System"], include_in_schema=False)
 def home():
-    return RedirectResponse(url="https://eti-msc-ai-driven-api.onrender.com/docs")
+    # return RedirectResponse(url="https://eti-msc-ai-driven-api.onrender.com/docs")
+    return RedirectResponse(url="http://localhost:8000/docs")
 
 @app.get("/health", tags=["System"])
 def health():
@@ -1067,9 +1068,91 @@ def predict(payload: dict):
         logger.error(f"Prediction error: {traceback.format_exc()}")
         raise HTTPException(500, "Prediction failed")
 
+# @app.post("/persist", tags=["Persistence"], dependencies=[Depends(get_api_key)])
+# def persist_data(request: PersistRequest):
+#     """Persist data to recommended or specified database"""
+#     try:
+#         if not request.data:
+#             raise HTTPException(400, "Missing 'data' field")
+
+#         # Determine target database
+#         target_db = request.database
+#         if not target_db:
+#             features = analyze_payload(request.data)
+#             decision = predictor.predict(features)
+#             target_db = decision["database"]
+
+#         # Validate connection
+#         if not request.connection or not request.connection.get("type"):
+#             raise HTTPException(400, "Connection details are required for persistence")
+
+#         conn_type = request.connection["type"].lower()
+
+#         # Select adapter
+#         if conn_type == "postgres":
+#             from app.adapters.postgres_adapter import PostgresAdapter
+#             adapter = PostgresAdapter()
+#         elif conn_type == "mongo":
+#             from app.adapters.mongo_adapter import MongoAdapter
+#             adapter = MongoAdapter()
+#         elif conn_type == "redis":
+#             from app.adapters.redis_adapter import RedisAdapter
+#             adapter = RedisAdapter()
+#         elif conn_type == "influxdb":
+#             from app.adapters.influx_adapter import InfluxAdapter
+#             adapter = InfluxAdapter()
+#         elif conn_type == "neo4j":
+#             from app.adapters.neo4j_adapter import Neo4jAdapter
+#             adapter = Neo4jAdapter()
+#         else:
+#             raise HTTPException(400, f"Unsupported database type: {conn_type}")
+
+#         # Persist data
+#         result = adapter.insert(request.data)
+
+#         return {
+#             "success": True,
+#             "database": target_db,
+#             "record_id": result.get("id"),
+#             "strategy_used": result.get("strategy", "insert"),
+#             "message": f"Data successfully persisted in {target_db}"
+#         }
+
+#     except HTTPException as he:
+#         raise he
+#     except Exception as e:
+#         logger.error(f"Persistence failed for {target_db if 'target_db' in locals() else 'unknown'}: {traceback.format_exc()}")
+#         raise HTTPException(500, f"Failed to persist data: {str(e)}")
+
+
+
+
+# ── REPLACE the existing persist_data() function in app/main.py with this ──
+#
+# WHAT CHANGED AND WHY:
+# The original handler instantiated each adapter with NO arguments
+# (e.g. PostgresAdapter()), which caused the adapter's __init__ to fall
+# back to YOUR OWN server-side POSTGRES_URL/MONGO_URL from app/config.py
+# - meaning /persist was silently writing to (or, before this fix,
+# pretending to write to) the middleware's own database, never the
+# caller's. It also never passed request.connection to adapter.insert()
+# at all, even though the connection dict was validated to exist.
+#
+# This corrected version passes request.connection through to the
+# adapter on every call, matching the corrected adapter signatures
+# (insert(data, connection), bulk_insert(data, connection), etc.) in
+# postgres_adapter.py and mongo_adapter.py.
+
 @app.post("/persist", tags=["Persistence"], dependencies=[Depends(get_api_key)])
 def persist_data(request: PersistRequest):
-    """Persist data to recommended or specified database"""
+    """Persist data to recommended or specified database.
+
+    SECURITY MODEL: request.connection must contain the CALLER'S OWN
+    database credentials. This middleware never stores these credentials
+    - they are used only to open a short-lived connection for the
+    duration of this single request, then discarded.
+    """
+    target_db = None
     try:
         if not request.data:
             raise HTTPException(400, "Missing 'data' field")
@@ -1081,46 +1164,59 @@ def persist_data(request: PersistRequest):
             decision = predictor.predict(features)
             target_db = decision["database"]
 
-        # Validate connection
+        # Validate connection - REQUIRED, since this middleware holds no
+        # credentials of its own for any caller's database
         if not request.connection or not request.connection.get("type"):
-            raise HTTPException(400, "Connection details are required for persistence")
+            raise HTTPException(
+                400,
+                "Connection details are required for persistence. "
+                "Supply your own database credentials in the 'connection' field; "
+                "this middleware does not store or reuse credentials across requests."
+            )
 
         conn_type = request.connection["type"].lower()
 
-        # Select adapter
+        # Select adapter and pass the connection dict through
         if conn_type == "postgres":
             from app.adapters.postgres_adapter import PostgresAdapter
             adapter = PostgresAdapter()
+            result = adapter.insert(request.data, connection=request.connection)
         elif conn_type == "mongo":
             from app.adapters.mongo_adapter import MongoAdapter
             adapter = MongoAdapter()
+            result = adapter.insert(request.data, connection=request.connection)
         elif conn_type == "redis":
             from app.adapters.redis_adapter import RedisAdapter
             adapter = RedisAdapter()
+            result = adapter.insert(request.data, connection=request.connection)
         elif conn_type == "influxdb":
             from app.adapters.influx_adapter import InfluxAdapter
             adapter = InfluxAdapter()
+            result = adapter.insert(request.data, connection=request.connection)
         elif conn_type == "neo4j":
             from app.adapters.neo4j_adapter import Neo4jAdapter
             adapter = Neo4jAdapter()
+            result = adapter.insert(request.data, connection=request.connection)
         else:
             raise HTTPException(400, f"Unsupported database type: {conn_type}")
-
-        # Persist data
-        result = adapter.insert(request.data)
 
         return {
             "success": True,
             "database": target_db,
             "record_id": result.get("id"),
-            "strategy_used": result.get("strategy", "insert"),
+            "strategy_used": result.get("status", "insert"),
             "message": f"Data successfully persisted in {target_db}"
         }
 
     except HTTPException as he:
         raise he
+    except ValueError as ve:
+        # Raised by adapters for missing/invalid connection fields -
+        # a client error (bad request), not a server error
+        logger.error(f"Persistence validation error: {ve}")
+        raise HTTPException(400, str(ve))
     except Exception as e:
-        logger.error(f"Persistence failed for {target_db if 'target_db' in locals() else 'unknown'}: {traceback.format_exc()}")
+        logger.error(f"Persistence failed for {target_db or 'unknown'}: {traceback.format_exc()}")
         raise HTTPException(500, f"Failed to persist data: {str(e)}")
 
 @app.post("/route", tags=["Database Operations"], dependencies=[Depends(get_api_key)])

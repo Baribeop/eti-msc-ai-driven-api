@@ -5,6 +5,7 @@
 # from  app.analysis.time_series import time_series_score
 
 
+
 # def extract_keys(data, keys=None):
 
 #     if keys is None:
@@ -195,7 +196,6 @@ def schema_flexibility(data):
         score += 3
     return min(score, 10)
 
-
 # ====================== MAIN ANALYSIS FUNCTION ======================
 
 def analyze_payload(data: Any) -> Dict:
@@ -238,7 +238,6 @@ def analyze_payload(data: Any) -> Dict:
         #     )
         # ),
 
-
         "has_identifier": (
             isinstance(data, dict)
             and any(
@@ -250,6 +249,8 @@ def analyze_payload(data: Any) -> Dict:
         "num_keys": len(set(keys)),
         "has_nested": any(isinstance(v, (dict, list)) for v in (data.values() if isinstance(data, dict) else []))
     }
+
+
 
     # Merge and return complete feature set
     features.update(structural)
@@ -267,6 +268,7 @@ if __name__ == "__main__":
         "timestamp": "2025-06-15T10:00:00",
         "total": 1299.0
     }
+    
     
     result = analyze_payload(test_payload)
     print("✅ Analysis successful!")
