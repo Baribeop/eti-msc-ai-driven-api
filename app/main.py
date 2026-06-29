@@ -1008,8 +1008,8 @@ class QueryRequest(BaseModel):
 
 @app.get("/", tags=["System"], include_in_schema=False)
 def home():
-    # return RedirectResponse(url="https://eti-msc-ai-driven-api.onrender.com/docs")
-    return RedirectResponse(url="http://localhost:8000/docs")
+    return RedirectResponse(url="https://eti-msc-ai-driven-api.onrender.com/docs")
+    # return RedirectResponse(url="http://localhost:8000/docs")
 
 @app.get("/health", tags=["System"])
 def health():
