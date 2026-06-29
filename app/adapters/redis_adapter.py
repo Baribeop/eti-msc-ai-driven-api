@@ -44,150 +44,144 @@
 #         }
 
 
+
+
+
 """
-neo4j_adapter.py (CORRECTED)
+redis_adapter.py (CORRECTED)
 ------------------------------
-Same security model as the other adapters: every method accepts a
-`connection` dict supplied by the calling client in the SAME request,
-builds a short-lived Neo4j driver from it, executes the write, and
-closes the driver immediately after. No credentials are stored, logged,
-or persisted by this middleware.
+Same security model as postgres_adapter.py / mongo_adapter.py: every
+method accepts a `connection` dict supplied by the calling client in the
+SAME request, builds a short-lived Redis client from it, executes the
+operation, and closes the connection immediately after. No credentials
+are stored, logged, or persisted by this middleware.
 
 STORAGE MODEL NOTE:
-Neo4j stores labelled nodes with properties, and labelled, directed
-relationships (edges) between them. This adapter maps an incoming
-payload as follows: create_node() creates a single node, using
-connection["label"] (or "PolyglotNode" by default) as the node label,
-and all top-level scalar key-value pairs in the payload as node
-properties (nested dict/list values are JSON-stringified, since Neo4j
-node properties must be primitive types or arrays of primitives).
-create_edge() expects the payload to contain "source" and "target" node
-identifiers (matched by an "id" property) and creates a relationship of
-type connection["relationship_type"] (or "RELATED_TO" by default)
-between them, creating the nodes if they do not already exist (MERGE
-semantics) to avoid duplicate-node errors on repeated calls.
+Redis is a key-value store, so "persisting a payload" means storing the
+JSON-serialised payload under a key. By default this adapter generates
+a key automatically (polyglot:<uuid>) unless the caller specifies one
+via connection["key"] or a top-level "key"/"id" field in the payload
+itself. This is analogous to PostgresAdapter's json_blob mode - there is
+no meaningful "typed_columns" equivalent for Redis, since Redis has no
+column/schema concept at all.
 
 Expected `connection` dict shape:
 {
-    "type": "neo4j",
-    "uri": "bolt://localhost:7687",
-    "user": "neo4j",
-    "password": "mypassword",
-    "label": "Person",                    # optional, defaults to "PolyglotNode"
-    "relationship_type": "FRIENDS_WITH"   # optional, defaults to "RELATED_TO"
+    "type": "redis",
+    "host": "localhost",
+    "port": 6379,
+    "password": "mypassword",   # optional, omit if no auth configured
+    "db": 0,                    # optional, defaults to 0
+    "key": "my_custom_key",     # optional, auto-generated if omitted
+    "ttl": 3600                 # optional, seconds; no expiry if omitted
 }
 """
 
-from neo4j import GraphDatabase
+import redis
 import json
+import uuid
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class Neo4jAdapter:
+class RedisAdapter:
 
-    def _build_driver(self, connection: dict):
-        required = ["uri", "user", "password"]
-        missing = [f for f in required if not connection.get(f)]
-        if missing:
-            raise ValueError(f"Missing required connection fields: {missing}")
+    def _build_client(self, connection: dict):
+        """Builds a short-lived Redis client from caller-supplied
+        connection details."""
+        if not connection.get("host"):
+            raise ValueError("Missing required connection field: host")
 
-        driver = GraphDatabase.driver(
-            connection["uri"],
-            auth=(connection["user"], connection["password"])
+        client = redis.Redis(
+            host=connection["host"],
+            port=connection.get("port", 6379),
+            password=connection.get("password"),
+            db=connection.get("db", 0),
+            decode_responses=True,
+            socket_connect_timeout=5,
         )
-        driver.verify_connectivity()  # fail fast if connection details are wrong
-        return driver
+        client.ping()  # fail fast if connection details are wrong
+        return client
 
-    def _flatten_properties(self, data: dict) -> dict:
-        """Neo4j node/relationship properties must be primitive types
-        (or arrays of primitives) - nested dicts/lists are JSON-stringified
-        so no payload can fail to be stored, at the cost of losing native
-        graph-queryability on those specific nested fields."""
-        props = {}
-        for key, value in data.items():
-            if isinstance(value, (dict,)):
-                props[key] = json.dumps(value)
-            elif isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value):
-                props[key] = json.dumps(value)
-            else:
-                props[key] = value
-        return props
+    def _resolve_key(self, data, connection: dict) -> str:
+        if connection.get("key"):
+            return connection["key"]
+        if isinstance(data, dict):
+            for id_field in ("id", "_id", "key", "session_id"):
+                if id_field in data:
+                    return f"polyglot:{data[id_field]}"
+        return f"polyglot:{uuid.uuid4()}"
 
     def insert(self, data, connection: dict = None):
-        """Generic entry point matching the other adapters' insert()
-        signature, so main.py's /persist handler can call all five
-        adapters uniformly. Delegates to create_node()."""
-        return self.create_node(data, connection=connection)
+        """Generic entry point matching the insert() signature used by
+        the other adapters, so main.py's /persist handler can call all
+        five adapters uniformly. Internally delegates to set()."""
+        return self.set(data, connection=connection)
 
-    def create_node(self, data, connection: dict = None):
+    def set(self, data, connection: dict = None):
         if connection is None:
-            raise ValueError("Neo4jAdapter.create_node() requires a connection dict")
+            raise ValueError("RedisAdapter.set() requires a connection dict")
 
-        driver = self._build_driver(connection)
+        client = self._build_client(connection)
         try:
-            label = connection.get("label", "PolyglotNode")
-            props = self._flatten_properties(dict(data))
+            key = self._resolve_key(data, connection)
+            value = json.dumps(data)
+            ttl = connection.get("ttl")
 
-            with driver.session() as session:
-                result = session.run(
-                    f"CREATE (n:{label} $props) RETURN elementId(n) AS node_id",
-                    props=props
-                )
-                record = result.single()
-                node_id = record["node_id"]
+            if ttl:
+                client.setex(key, ttl, value)
+            else:
+                client.set(key, value)
 
-            logger.info(f"Neo4j node created: label={label}, id={node_id}")
+            logger.info(f"Redis set successful: key={key}, ttl={ttl}")
             return {
-                "status": "node_created",
-                "database": "neo4j",
-                "label": label,
-                "id": node_id
+                "status": "stored",
+                "database": "redis",
+                "key": key,
+                "ttl": ttl
             }
         finally:
-            driver.close()
+            client.close()
 
-    def create_edge(self, data, connection: dict = None):
-        """Expects data to contain 'source' and 'target' node identifiers
-        (matched against each node's 'id' property). Uses MERGE so
-        repeated calls with the same source/target do not create
-        duplicate nodes."""
+    def set_with_expiry(self, data, connection: dict = None, ttl: int = 300):
         if connection is None:
-            raise ValueError("Neo4jAdapter.create_edge() requires a connection dict")
+            raise ValueError("RedisAdapter.set_with_expiry() requires a connection dict")
+        # Reuse set(), injecting ttl into the connection dict if not already present
+        conn_with_ttl = {**connection, "ttl": connection.get("ttl", ttl)}
+        result = self.set(data, connection=conn_with_ttl)
+        result["status"] = "stored_with_expiry"
+        return result
 
-        data_dict = dict(data)
-        if "source" not in data_dict or "target" not in data_dict:
-            raise ValueError("create_edge() requires 'source' and 'target' fields in data")
+    def pipeline(self, data: list, connection: dict = None):
+        """Stores multiple items in a single Redis pipeline (batched
+        round-trip) for efficiency."""
+        if connection is None:
+            raise ValueError("RedisAdapter.pipeline() requires a connection dict")
 
-        driver = self._build_driver(connection)
+        client = self._build_client(connection)
         try:
-            label = connection.get("label", "PolyglotNode")
-            rel_type = connection.get("relationship_type", "RELATED_TO")
-            edge_props = {k: v for k, v in data_dict.items() if k not in ("source", "target")}
-            edge_props = self._flatten_properties(edge_props)
+            pipe = client.pipeline()
+            keys = []
+            ttl = connection.get("ttl")
 
-            with driver.session() as session:
-                result = session.run(
-                    f"""
-                    MERGE (a:{label} {{id: $source}})
-                    MERGE (b:{label} {{id: $target}})
-                    CREATE (a)-[r:{rel_type} $props]->(b)
-                    RETURN elementId(r) AS edge_id
-                    """,
-                    source=data_dict["source"],
-                    target=data_dict["target"],
-                    props=edge_props
-                )
-                record = result.single()
-                edge_id = record["edge_id"]
+            for item in data:
+                key = self._resolve_key(item, connection) if connection.get("key") is None else f"{connection['key']}:{len(keys)}"
+                keys.append(key)
+                value = json.dumps(item)
+                if ttl:
+                    pipe.setex(key, ttl, value)
+                else:
+                    pipe.set(key, value)
 
-            logger.info(f"Neo4j edge created: {data_dict['source']}-[{rel_type}]->{data_dict['target']}")
+            pipe.execute()
+
+            logger.info(f"Redis pipeline successful: count={len(keys)}")
             return {
-                "status": "edge_created",
-                "database": "neo4j",
-                "relationship_type": rel_type,
-                "id": edge_id
+                "status": "pipeline_complete",
+                "database": "redis",
+                "count": len(keys),
+                "keys": keys
             }
         finally:
-            driver.close()
+            client.close()
